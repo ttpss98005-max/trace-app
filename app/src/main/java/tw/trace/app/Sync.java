@@ -429,6 +429,7 @@ final class Sync implements Cloud.Session, Painter.Info {
             @Override public void run() {
                 Map<String, Object> prefs = null;
                 boolean failed = false;
+                String why = "";
                 String oldJson = null;
                 try {
                     Cloud.Doc d = cloud.get("users/" + user.uid + "/trace/prefs");
@@ -458,14 +459,16 @@ final class Sync implements Cloud.Session, Painter.Info {
                     }
                 } catch (IOException | RuntimeException e) {
                     failed = true;
+                    why = e.getClass().getSimpleName() + (e instanceof Cloud.ApiError ? " " + ((Cloud.ApiError) e).http + " " + ((Cloud.ApiError) e).code : "") + "：" + e.getMessage();
                     if (e instanceof Cloud.ApiError && ((Cloud.ApiError) e).signedOut()) { sessionLost(myEpoch); return; }
                 }
                 final Map<String, Object> pr = prefs;
                 final boolean fail = failed;
+                final String whyF = why;
                 main.post(new Runnable() {
                     @Override public void run() {
                         if (myEpoch != epoch) return;
-                        if (fail && !hadCache) { setNote("無法讀取你的資料。請確認已連上網路，再試一次。", true); main.postDelayed(new Runnable() { @Override public void run() { if (myEpoch == epoch) loadUser(user); } }, 5000); return; }
+                        if (fail && !hadCache) { setNote("無法讀取你的資料（" + whyF + "）", true); main.postDelayed(new Runnable() { @Override public void run() { if (myEpoch == epoch) loadUser(user); } }, 5000); return; }
                         if (pr != null && pr.get("theme") instanceof Map) {
                             b.store.put("theme", pr.get("theme"));
                             ui.applyTheme();
