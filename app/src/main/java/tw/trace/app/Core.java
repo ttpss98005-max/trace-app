@@ -104,6 +104,9 @@ final class Core {
 
     static boolean isPortal(Map<String, Object> n) { return "portal".equals(n.get("kind")); }
 
+    /** A review switch: no checklist or due date, just passed (manualDone) or not. Older versions see a plain node. */
+    static boolean isGate(Map<String, Object> n) { return "gate".equals(n.get("kind")); }
+
     static boolean counted(Map<String, Object> n) { return !(isPortal(n) && b(n, "noCount")); }
 
     static Map<String, Object> project(Map<String, Object> st, String id) {
@@ -565,7 +568,7 @@ final class Core {
                     String nt = idMap.get(s(n, "target"));
                     if (nt != null) n.put("target", nt);
                 } else {
-                    n.remove("kind");
+                    if (!isGate(n)) n.remove("kind");
                     List<Object> its = new ArrayList<>();
                     if (n.get("items") instanceof List) for (Object x : arr(n.get("items"))) {
                         if (!(x instanceof Map)) continue;

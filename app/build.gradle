@@ -10,8 +10,8 @@ android {
         applicationId 'tw.trace.app'
         minSdk 26
         targetSdk 34
-        versionCode 2
-        versionName '0.2'
+        versionCode 3
+        versionName '0.3'
     }
 
     // 固定簽章：每次編譯都用同一把金鑰，新版才能直接覆蓋安裝舊版，Google 登入也才會一直有效

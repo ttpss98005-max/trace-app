@@ -91,6 +91,8 @@ final class Board {
     final Map<String, Geo> G = new LinkedHashMap<>();
     final List<Lane> laneBoxes = new ArrayList<>();
     final Map<String, Integer> seq = new HashMap<>();
+    /** Nodes behind a review that has not passed. They stay editable; the screen marks them as waiting. */
+    final Set<String> locked = new HashSet<>();
     Lane mainBox;
     double total, spine, bottom, headX, headY, minX;
     int d0, d1;
@@ -242,7 +244,56 @@ final class Board {
         live.add("root");
         for (Map<String, Object> n : nodes(state)) live.add(s(n, "id"));
         G.keySet().retainAll(live);
+        computeLocked();
         buildEnvelope();
+    }
+
+    private static boolean openGate(Map<String, Object> n) { return Core.isGate(n) && !Core.b(n, "manualDone"); }
+
+    private void computeLocked() {
+        locked.clear();
+        boolean grew = true;
+        while (grew) {
+            grew = false;
+            for (Lane l : laneBoxes) {
+                String aid = anchorId(l.lane);
+                boolean shut = false;
+                if (!"root".equals(aid)) {
+                    Map<String, Object> a = Core.nodeOf(state, aid);
+                    shut = a != null && (openGate(a) || locked.contains(aid));
+                }
+                for (Map<String, Object> n : l.items) {
+                    if (shut && locked.add(s(n, "id"))) grew = true;
+                    if (openGate(n)) shut = true;
+                }
+            }
+        }
+    }
+
+    /** The node the person last touched: it and what is wired to it stay bright. */
+    String focusId() {
+        String f = hoverId != null ? hoverId : selId;
+        return f != null && Core.nodeOf(state, f) != null ? f : null;
+    }
+
+    /** Nodes wired directly to this one, plus the project card when it starts the main line. */
+    Set<String> connectedTo(String id) {
+        Set<String> out = new HashSet<>();
+        out.add(id);
+        Map<String, Object> me = Core.nodeOf(state, id);
+        if (me == null) return out;
+        for (Object o : Core.links(me)) out.add(String.valueOf(o));
+        for (Map<String, Object> n : nodes(state)) if (Core.links(n).contains(id)) out.add(s(n, "id"));
+        for (Lane l : laneBoxes) {
+            int i = -1;
+            for (int k = 0; k < l.items.size(); k++) if (id.equals(s(l.items.get(k), "id"))) i = k;
+            if (i > 0) out.add(s(l.items.get(i - 1), "id"));
+            if (i >= 0 && i + 1 < l.items.size()) out.add(s(l.items.get(i + 1), "id"));
+            String aid = anchorId(l.lane);
+            if (i == 0) out.add(l == mainBox ? "root" : aid);
+            if (id.equals(aid) && !l.items.isEmpty()) out.add(s(l.items.get(0), "id"));
+        }
+        return out;
     }
 
     private void buildEnvelope() {

@@ -296,6 +296,7 @@ final class Panel {
         mode = null;
         draft = null;
         bd().selId = null;
+        bd().hoverId = null;
         bd().need();
     }
 
@@ -406,17 +407,24 @@ final class Panel {
             }
         });
         c2.addView(gapped(dateBtn, 5));
+        boolean gate = Core.isGate(n);
         LinearLayout.LayoutParams a = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1), b0 = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1);
         b0.leftMargin = dp(10);
         two.addView(c1, a);
-        two.addView(c2, b0);
+        if (!gate) two.addView(c2, b0);
         body.addView(two, full());
         // kind
         addLabel(body, "類型");
         boolean portal = Core.isPortal(n);
-        body.addView(gapped(segmented(new String[]{"一般節點", "傳送門"}, portal ? 1 : 0, new Pick() {
+        body.addView(gapped(segmented(new String[]{"一般節點", "審核", "傳送門"}, portal ? 2 : gate ? 1 : 0, new Pick() {
             @Override public void picked(int i) {
                 if (i == 1) {
+                    if (!items(n).isEmpty()) { B.toast("這個節點有細項，請先刪除細項再改成審核", null, null); return; }
+                    n.put("kind", "gate");
+                    n.remove("target");
+                    n.remove("noCount");
+                    n.remove("blocked");
+                } else if (i == 2) {
                     n.put("kind", "portal");
                     if (Core.project(B.store, s(n, "target")) == null) {
                         Object t = null;
@@ -433,7 +441,10 @@ final class Panel {
                 nodeForm(n, isNew, false);
             }
         }), 5));
-        if (portal) portalPart(n, isNew); else itemsPart(n, isNew);
+        pendingAdd = null;
+        if (portal) portalPart(n, isNew);
+        else if (gate) gatePart(n, isNew);
+        else itemsPart(n, isNew);
         // links
         if (!isNew) {
             final List<Object> valid = new ArrayList<>();
@@ -508,6 +519,18 @@ final class Panel {
             java.time.LocalDate d = java.time.LocalDate.ofEpochDay(Core.today());
             return new int[]{d.getYear(), d.getMonthValue(), d.getDayOfMonth()};
         }
+    }
+
+    private void gatePart(final Map<String, Object> n, final boolean isNew) {
+        addLabel(body, "審核結果");
+        body.addView(gapped(segmented(new String[]{"未通過", "通過"}, b(n, "manualDone") ? 1 : 0, new Pick() {
+            @Override public void picked(int i) {
+                n.put("manualDone", i == 1);
+                set(isNew);
+                nodeForm(n, isNew, false);
+            }
+        }), 5));
+        body.addView(gapped(note("審核不用設定時間。未通過時，後面的節點一樣可以新增和完成，只會標示為等待審核。"), 6));
     }
 
     private void portalPart(final Map<String, Object> n, final boolean isNew) {

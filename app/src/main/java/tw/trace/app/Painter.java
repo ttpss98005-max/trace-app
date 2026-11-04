@@ -375,8 +375,8 @@ final class Painter {
     }
 
     private void drawWires(Canvas c) {
-        String hover = b.hoverId;
-        boolean hN = hover != null && Core.nodeOf(b.state, hover) != null;
+        String hover = b.focusId();
+        boolean hN = hover != null;
         double sy = b.spine, ssy = SY(sy);
         Map<String, Board.Geo> G = b.G;
         Board.Lane main = b.mainBox;
@@ -485,14 +485,15 @@ final class Painter {
                 double[][] pts = elbowPts(SX(A.ax + Board.W), SY(A.ay + Board.H / 2), SX(B.ax), SY(B.ay + Board.H / 2));
                 if (offScreen(pts)) continue;
                 double al = hN && !lit ? .3 : 1;
-                boolean ad = "done".equals(a.get("status")), bd = "done".equals(e.get("status"));
-                strokeOf(alpha(col, al), lit ? 2.4 : (ad && bd ? 1.8 : 1.2));
+                boolean shut = b.locked.contains(B.id);
+                boolean ad = "done".equals(a.get("status")) && !b.locked.contains(A.id), bd = "done".equals(e.get("status")) && !shut;
+                strokeOf(alpha(col, shut ? al * .55 : al), lit ? 2.4 : (ad && bd ? 1.8 : 1.2));
                 if (!(ad && bd)) {
                     boolean doing = "doing".equals(a.get("status")) || "doing".equals(e.get("status"));
                     dash(doing && !b.reduce ? (T * .025) % 11 * -1 + 11 : 0, 6, 5);
                 }
                 strokePoly(c, pts);
-                if (ad) packets(c, pts, col, hN && !lit ? .35 : 1, bd ? 1 : .5);
+                if (ad && !shut) packets(c, pts, col, hN && !lit ? .35 : 1, bd ? 1 : .5);
             }
         }
         // hand-drawn connections pulled from a node's right port
@@ -774,6 +775,8 @@ final class Painter {
             txt(c, "+", l.tx + 20 - tw("+") / 2, base(l.ty, 40));
             c.restore();
         }
+        String focus = b.focusId();
+        java.util.Set<String> bright = focus == null ? null : b.connectedTo(focus);
         for (Board.Geo g : new ArrayList<>(b.G.values())) {
             double sx = SX(g.ax), sy = SY(g.ay);
             if (sx > VW + 60 || sy > VH + 60 || sx + Board.aw(g.id) * z < -60 || sy + g.h * z < -60) continue;
@@ -782,6 +785,7 @@ final class Painter {
             c.scale(f(z), f(z));
             if ("root".equals(g.id)) drawRoot(c, g, far);
             else drawNode(c, g, far);
+            if (bright != null && !bright.contains(g.id)) fr(c, g.ax - 8, g.ay - 8, Board.aw(g.id) + 16, g.h + 16, alpha(0xFF000000, th.dark ? .5 : .2));
             c.restore();
         }
     }
@@ -833,6 +837,7 @@ final class Painter {
         if (lane == null) return;
         int col = Theme.hex(s(lane, "color"));
         String status = String.valueOf(n.get("status"));
+        boolean gate = Core.isGate(n), passed = gate && Core.b(n, "manualDone"), waiting = b.locked.contains(g.id);
         boolean portal = Core.isPortal(n), sel = g.id.equals(b.selId), dragging = b.drag != null && b.drag.moved && g.id.equals(b.drag.id);
         double x = g.ax, y = g.ay, W = Board.W, h = g.h, pct = Core.n(n, "pct");
         Map<String, Object> tp = portal ? Core.project(b.store, s(n, "target")) : null;
@@ -899,6 +904,13 @@ final class Painter {
                 path.close();
                 c.drawPath(path, fillOf(th.bg));
             }
+        } else if (gate) {
+            padlock(c, px, cy - 1 * cellsK, 12 * cellsK, passed, col);
+            font(F.monoMed, tfs, th.dim);
+            txt(c, "審核", px + 12 * cellsK + 6, base(top, rowH));
+            String st = passed ? "已通過" : "待審核";
+            font(F.cjkBold, far ? 14 : 10.5, passed ? col : th.danger);
+            txt(c, st, x + W - 11 - tw(st), base(top, rowH));
         } else {
             int on = (int) Math.ceil(pct / 20);
             for (int i = 0; i < 5; i++) {
@@ -927,7 +939,11 @@ final class Painter {
             font(F.monoMed, 10.5, th.dim);
             double mb = base(cursor, 10.5);
             String date = s(n, "date");
-            if (portal) {
+            if (gate) {
+                String t = waiting ? "等待前面的審核" : passed ? "可以繼續" : "通過後才繼續";
+                font(F.cjkMed, 10.5, th.dim);
+                txt(c, t, px, mb);
+            } else if (portal) {
                 String a = "→ " + (tp != null ? s(tp, "name") : "已刪除的專案"), e = date.substring(5).replace('-', '.');
                 String p = Core.b(n, "noCount") ? "" : Math.round(pct) + "%";
                 double right = x + W - 11;
@@ -943,7 +959,8 @@ final class Painter {
                 if ("done".equals(status)) due = "完成";
                 else {
                     int d = dn(date) - b.today;
-                    if (d < 0) { due = "逾期 " + (-d) + " 天"; late = true; }
+                    if (waiting) due = "等待審核";
+                    else if (d < 0) { due = "逾期 " + (-d) + " 天"; late = true; }
                     else if (d == 0) due = "今天到期";
                     else due = "D-" + d;
                 }
@@ -972,7 +989,13 @@ final class Painter {
         if (!portal) {
             List<Map<String, Object>> its = items(n);
             double boxS = far ? 13 : 10, itFs = far ? 17 : 12, row = y + (far ? 94 : 90);
-            if (its.isEmpty()) {
+            if (gate) {
+                double th0 = far ? 18 : 14, tw0 = th0 * 2, ty0 = row + 11 - th0 / 2;
+                fr(c, px, ty0, tw0, th0, passed ? col : th.line);
+                fr(c, passed ? px + tw0 - th0 + 2 : px + 2, ty0 + 2, th0 - 4, th0 - 4, passed ? th.card : th.dim);
+                font(F.cjkMed, itFs, th.ink);
+                txt(c, passed ? "通過" : "未通過", px + tw0 + 8, base(row, 22));
+            } else if (its.isEmpty()) {
                 boolean d = Core.b(n, "manualDone");
                 if (d) fr(c, px, row + 11 - boxS / 2, boxS, boxS, col);
                 strokeOf(col, 1);
@@ -1015,6 +1038,20 @@ final class Painter {
             strokeOf(col, 1.5);
             c.drawPath(path, stroke);
         }
+    }
+
+    private void padlock(Canvas c, double x, double y, double s0, boolean open, int col) {
+        double bw = s0 * .8, bh = s0 * .55, bx = x, by = y + s0 - bh;
+        fr(c, bx, by, bw, bh, col);
+        strokeOf(col, s0 * .13);
+        double cx = bx + bw / 2, r = bw * .3, top = by - s0 * .22;
+        path.reset();
+        path.moveTo(f(cx - r), f(by));
+        path.lineTo(f(cx - r), f(top));
+        rect.set(f(cx - r), f(top - r), f(cx + r), f(top + r));
+        path.arcTo(rect, 180, 180, false);
+        path.lineTo(f(cx + r), f(open ? top : by));
+        c.drawPath(path, stroke);
     }
 
     /* ---------- lane tags ---------- */
@@ -1535,7 +1572,7 @@ final class Painter {
         for (Map<String, Object> n : nodes(b.state)) {
             String st = String.valueOf(n.get("status"));
             if (Core.counted(n)) { cnt++; if ("done".equals(st)) done++; }
-            if (!"done".equals(st) && dn(s(n, "date")) < b.today) late++;
+            if (!"done".equals(st) && !Core.isGate(n) && dn(s(n, "date")) < b.today) late++;
             if ("blocked".equals(st)) blocked++;
         }
         out.add(new String[]{"節點 " + done + "/" + cnt, null});
@@ -1811,7 +1848,7 @@ final class Painter {
             sumT += totals[i];
             for (Map<String, Object> m : nodes(p)) {
                 if (Core.isPortal(m)) portals++;
-                else if (!"done".equals(m.get("status")) && dn(s(m, "date")) < b.today) late++;
+                else if (!Core.isGate(m) && !"done".equals(m.get("status")) && dn(s(m, "date")) < b.today) late++;
             }
         }
         long avg = n > 0 ? Math.round(sumT / n) : 0;
@@ -1918,7 +1955,7 @@ final class Painter {
                 if ("done".equals(st)) done++;
                 else if (dn(s(m, "date")) >= b.today && (next == null || dn(s(m, "date")) < dn(s(next, "date")))) next = m;
             }
-            if (!"done".equals(st) && !Core.isPortal(m) && dn(s(m, "date")) < b.today) lt++;
+            if (!"done".equals(st) && !Core.isPortal(m) && !Core.isGate(m) && dn(s(m, "date")) < b.today) lt++;
         }
         List<String[]> facts = new ArrayList<>();
         facts.add(new String[]{"節點 " + done + "/" + cn.size(), null});
