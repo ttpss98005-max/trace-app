@@ -79,6 +79,17 @@ public final class MainActivity extends Activity implements Board.Host, Panel.Ho
         root.addView(stage, new FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT));
         root.addView(panel.frame, new FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT));
         setContentView(root);
+        // draw beside the camera cutout in landscape instead of leaving a black strip there
+        if (android.os.Build.VERSION.SDK_INT >= 28) {
+            getWindow().getAttributes().layoutInDisplayCutoutMode = WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES;
+            root.setOnApplyWindowInsetsListener(new View.OnApplyWindowInsetsListener() {
+                @Override public android.view.WindowInsets onApplyWindowInsets(View v, android.view.WindowInsets in) {
+                    android.view.DisplayCutout dc = in.getDisplayCutout();
+                    v.setPadding(dc == null ? 0 : dc.getSafeInsetLeft(), 0, dc == null ? 0 : dc.getSafeInsetRight(), 0);
+                    return in;
+                }
+            });
+        }
         // the keyboard and rotation change the free space: move the form along
         root.addOnLayoutChangeListener(new View.OnLayoutChangeListener() {
             @Override public void onLayoutChange(View v, int l, int t, int r, int bm, int ol, int ot, int or, int ob) {
@@ -323,6 +334,7 @@ public final class MainActivity extends Activity implements Board.Host, Panel.Ho
         w.setStatusBarColor(theme.bg);
         w.setNavigationBarColor(theme.bg);
         w.getDecorView().setBackgroundColor(theme.bg);
+        if (root != null) root.setBackgroundColor(theme.bg);
         View dv = w.getDecorView();
         int f = dv.getSystemUiVisibility();
         if (!theme.dark) f |= View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR | View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR;
