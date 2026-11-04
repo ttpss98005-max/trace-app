@@ -372,7 +372,7 @@ public final class MainActivity extends Activity implements Board.Host, Panel.Ho
     @Override public void enter(String joinCode) {
         board.loginOpen = false;
         if (joinCode != null) openJoinCode(joinCode);
-        else board.showBoard(s(board.state, "id"));
+        else board.showHub();   // always start at the overview after signing in
     }
 
     /* ---------- Panel.Host ---------- */
