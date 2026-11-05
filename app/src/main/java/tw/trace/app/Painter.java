@@ -220,7 +220,6 @@ final class Painter {
         drawHead(c);
         drawWires(c);
         drawCards(c);
-        drawWireDel(c);
         drawTags(c);
         drawRuler(c);
         drawWarp(c);
@@ -228,6 +227,7 @@ final class Painter {
         drawFin(c);
         drawMini(c);
         drawFoot(c);
+        drawWireDel(c);
         if (nodes(b.state).isEmpty()) drawEmpty(c);
         drawHud(c);
     }
@@ -382,7 +382,8 @@ final class Painter {
         String[] labels = {"＋ 新增節點", "× 刪除連線"}, keys = {"wireAdd", "wireDel"};
         font(F.cjkMed, 13, th.accent);
         double w0 = tw(labels[0]) + 24, w1 = tw(labels[1]) + 24, w = w0 + w1, h = 40;
-        double x = clamp(SX(b.selWx) - w / 2, 8, VW - w - 8), y = clamp(SY(b.selWy) - h - 14, b.rulerY + 8, VH - h - 8);
+        double x = clamp(SX(b.selWx) - w / 2, 8, VW - w - 8), minY = b.rulerY + 34, above = SY(b.selWy) - h - 14;
+        double y = clamp(above < minY ? SY(b.selWy) + 14 : above, minY, VH - h - 8);
         fr(c, x, y, w, h, th.bg);
         for (int i = 0; i < 2; i++) {
             double bx = i == 0 ? x : x + w0, bw = i == 0 ? w0 : w1;
