@@ -36,6 +36,7 @@ final class Board {
         boolean typingInPanel();
         void scheduleSave();
         void later(long ms, Runnable r);
+        void haptic();
         void redraw();
         void hubAction(String key, String arg);
         void loginTap();
@@ -414,7 +415,8 @@ final class Board {
     }
 
     /* ---------- pointer interaction ---------- */
-    static final class Drag { String id; double ox, oy, sx, sy; boolean moved, warp; int date; String lane, item; }
+    static final class Drag { String id, wasHover; double ox, oy, sx, sy; boolean moved, warp, armed; int date; String lane, item; }
+    static final long HOLD_MS = 500;
     static final class Pan { double sx, sy, cx, cy; boolean moved, root; }
     static final class Link { boolean h, moved; String from; double sx, sy; String tKind, tVal; int tDay; }
     static final class Pinch { double d, z, mx, my, cx, cy; }
@@ -485,6 +487,45 @@ final class Board {
         if (src != null && "node".equals(host.panelMode()) && w.id.equals(selId)) host.openEdit(w.id, false);
         if ("set".equals(host.panelMode())) host.redrawPanel();
         toast("已刪除連線", "復原", undo);
+    }
+
+    /** Where a node added on a wire goes: dated between both ends, placed so a shared date still sorts it between them. */
+    static final class Insert { String after, before, linkFrom, linkTo; }
+    Insert pendingInsert;
+
+    void addOnWire(String key) {
+        Wire w = wireByKey(key);
+        if (w == null) return;
+        Insert o = new Insert();
+        String lane;
+        Integer date = null;
+        if ("link".equals(w.kind)) {
+            Map<String, Object> a = Core.nodeOf(state, w.id), e = Core.nodeOf(state, w.to);
+            if (a == null || e == null) return;
+            lane = s(a, "lane");
+            date = Math.floorDiv(dn(s(a, "date")) + dn(s(e, "date")), 2);
+            o.after = w.id; o.linkFrom = w.id; o.linkTo = w.to;
+        } else if ("seq".equals(w.kind)) {
+            Map<String, Object> e = Core.nodeOf(state, w.id);
+            String pa = e == null ? null : prevInLane(e);
+            if (pa == null) return;
+            lane = s(e, "lane");
+            date = Math.floorDiv(dn(s(Core.nodeOf(state, pa), "date")) + dn(s(e, "date")), 2);
+            o.after = pa;
+        } else {
+            Map<String, Object> l = Core.laneOf(state, w.id);
+            if (l == null) return;
+            lane = w.id;
+            for (Lane box : laneBoxes) if (box.id.equals(w.id) && !box.items.isEmpty()) {
+                Map<String, Object> f = box.items.get(0);
+                int fd = dn(s(f, "date"));
+                date = Math.min(Math.floorDiv(anchorDay(l) + fd, 2), fd);
+                o.before = s(f, "id");
+            }
+        }
+        selWire = null;
+        pendingInsert = o;
+        host.openNew(lane, date == null ? null : ds(date), null);
     }
 
     /** The node right before this one on its own timeline, the one a timeline wire would come from. */
@@ -605,6 +646,7 @@ final class Board {
             }
         }
         Geo card = pickCard(wx, wy);
+        String wasHover = hoverId;
         hoverId = card != null && !"root".equals(card.id) ? card.id : null;
         if (card != null && "root".equals(card.id)) {
             Pan p = new Pan();
@@ -613,8 +655,8 @@ final class Board {
             return;
         }
         if (card != null) {
-            Drag d = new Drag();
-            d.id = card.id; d.ox = wx - card.ax; d.oy = wy - card.ay; d.sx = x; d.sy = y;
+            final Drag d = new Drag();
+            d.id = card.id; d.ox = wx - card.ax; d.oy = wy - card.ay; d.sx = x; d.sy = y; d.wasHover = wasHover;
             if (Core.isPortal(card.n)) {
                 // the 傳送 button sits at the right end of the first row
                 double bw = far() ? 74 : 58, bh = far() ? 36 : 28;
@@ -622,9 +664,18 @@ final class Board {
                 d.warp = onBtn && Core.project(store, s(card.n, "target")) != null;
             } else d.item = pickItem(card, wy);
             drag = d;
-            // bring to front
-            G.remove(card.id);
-            G.put(card.id, card);
+            /* a node only moves after being held still: a quick swipe across it still moves the page */
+            host.later(HOLD_MS, new Runnable() {
+                @Override public void run() {
+                    if (drag != d || d.moved) return;
+                    d.armed = true;
+                    // bring to front
+                    Geo held = G.remove(d.id);
+                    if (held != null) G.put(d.id, held);
+                    host.haptic();
+                    need();
+                }
+            });
             need();
             return;
         }
@@ -673,6 +724,14 @@ final class Board {
                 else { link.tKind = "lane"; link.tVal = l.id; }
             }
             return;
+        }
+        if (drag != null && !drag.armed) {
+            if (Math.hypot(x - drag.sx, y - drag.sy) < 6) return;
+            Pan p = new Pan();
+            p.sx = drag.sx; p.sy = drag.sy; p.cx = camX; p.cy = camY; p.moved = true;
+            hoverId = drag.wasHover;
+            drag = null;
+            pan = p;
         }
         if (pan != null) {
             if (Math.hypot(x - pan.sx, y - pan.sy) > 4) pan.moved = true;
@@ -758,7 +817,7 @@ final class Board {
                 commit();
                 if (d.id.equals(selId) && "node".equals(host.panelMode())) host.openEdit(d.id, false);
             }
-        } else if (!d.moved && !canceled) {
+        } else if (!d.moved && !d.armed && !canceled) {
             if (d.warp) teleport(d.id);
             else if (d.item != null) {
                 Map<String, Object> n = Core.nodeOf(state, d.id);
@@ -1144,6 +1203,7 @@ final class Board {
             case "tag": host.openSettings(arg); break;
             case "finGo": finaleOpen = false; need(); break;
             case "wireDel": deleteWire(selWire); break;
+            case "wireAdd": addOnWire(selWire); break;
             case "toastAct": {
                 Runnable f = toastFn;
                 toastMsg = null;

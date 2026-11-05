@@ -72,6 +72,7 @@ final class Panel {
     String mode;   // null, "new", "node", "set", "backup", "join"
     private Map<String, Object> draft;
     private String draftFrom;
+    private Board.Insert draftInsert;
     private boolean armDel = false;
 
     Panel(Context c, Host h) {
@@ -301,6 +302,36 @@ final class Panel {
     }
 
     /* ---------- node form ---------- */
+    private void placeNew(Board B, Map<String, Object> nn) {
+        Board.Insert o = draftInsert;
+        draftInsert = null;
+        if (o != null && o.linkFrom != null) {
+            Map<String, Object> a = Core.nodeOf(B.state, o.linkFrom);
+            if (a != null && Core.links(a).contains(o.linkTo)) {
+                List<Object> keep = new ArrayList<>(Core.links(a));
+                keep.set(keep.indexOf(o.linkTo), nn.get("id"));
+                a.put("links", keep);
+                List<Object> mine = new ArrayList<>();
+                mine.add(o.linkTo);
+                nn.put("links", mine);
+            }
+        }
+        // the first node of a timeline joins it even if its start wire was deleted earlier
+        String laneId = s(nn, "lane");
+        Map<String, Object> lane = Core.laneOf(B.state, laneId);
+        if (lane != null && Core.b(lane, "detached")) {
+            boolean empty = true;
+            for (Map<String, Object> m : nodes(B.state)) if (laneId.equals(s(m, "lane"))) empty = false;
+            if (empty) lane.remove("detached");
+        }
+        List<Object> list = Json.arr(B.state.get("nodes"));
+        String ref = o == null ? null : o.after != null ? o.after : o.before;
+        int at = -1;
+        for (int i = 0; ref != null && i < list.size(); i++) if (ref.equals(s(Json.obj(list.get(i)), "id"))) at = i;
+        if (at >= 0) list.add(o.after != null ? at + 1 : at, nn);
+        else list.add(nn);
+    }
+
     void openNew(String lane, String date, String from) {
         Board B = bd();
         String l = lane != null ? lane : s(B.mainLane(), "id");
@@ -318,6 +349,8 @@ final class Panel {
         }
         draft = Json.map("title", "", "lane", l, "date", d, "status", "todo", "pct", 0d, "note", "", "items", new ArrayList<Object>());
         draftFrom = from;
+        draftInsert = B.pendingInsert;
+        B.pendingInsert = null;
         B.selId = null;
         begin("new");
         nodeForm(draft, true, true);
@@ -773,7 +806,7 @@ final class Panel {
             }
             draftFrom = null;
         }
-        Json.arr(B.state.get("nodes")).add(nn);
+        placeNew(B, nn);
         B.commit();
         String nid = s(nn, "id");
         Board.Geo g = B.G.get(nid);

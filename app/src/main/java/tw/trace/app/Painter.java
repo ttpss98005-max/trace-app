@@ -379,16 +379,22 @@ final class Painter {
     private void drawWireDel(Canvas c) {
         Board.Wire pick = b.wireByKey(b.selWire);
         if (pick == null) return;
-        String label = "× 刪除這條線";
-        boolean down = b.isPressed("wireDel", null);
-        font(F.cjkMed, 13, down ? th.bg : th.accent);
-        double w = tw(label) + 26, h = 40;
+        String[] labels = {"＋ 新增節點", "× 刪除連線"}, keys = {"wireAdd", "wireDel"};
+        font(F.cjkMed, 13, th.accent);
+        double w0 = tw(labels[0]) + 24, w1 = tw(labels[1]) + 24, w = w0 + w1, h = 40;
         double x = clamp(SX(b.selWx) - w / 2, 8, VW - w - 8), y = clamp(SY(b.selWy) - h - 14, b.rulerY + 8, VH - h - 8);
-        fr(c, x, y, w, h, down ? th.accent : th.bg);
+        fr(c, x, y, w, h, th.bg);
+        for (int i = 0; i < 2; i++) {
+            double bx = i == 0 ? x : x + w0, bw = i == 0 ? w0 : w1;
+            boolean down = b.isPressed(keys[i], null);
+            if (down) fr(c, bx, y, bw, h, th.accent);
+            font(F.cjkMed, 13, down ? th.bg : th.accent);
+            txt(c, labels[i], bx + 12, base(y, h));
+            b.addBtn(bx, y, bw, h, keys[i], null);
+        }
         strokeOf(th.accent, 1);
         rectLine(c, x, y, w, h);
-        txt(c, label, x + 13, base(y, h));
-        b.addBtn(x, y, w, h, "wireDel", null);
+        line(c, x + w0, y, x + w0, y + h);
     }
 
     private void drawWires(Canvas c) {
@@ -886,7 +892,7 @@ final class Painter {
         int col = Theme.hex(s(lane, "color"));
         String status = String.valueOf(n.get("status"));
         boolean gate = Core.isGate(n), passed = gate && Core.b(n, "manualDone"), waiting = b.locked.contains(g.id);
-        boolean portal = Core.isPortal(n), sel = g.id.equals(b.selId), dragging = b.drag != null && b.drag.moved && g.id.equals(b.drag.id);
+        boolean portal = Core.isPortal(n), sel = g.id.equals(b.selId), dragging = b.drag != null && (b.drag.moved || b.drag.armed) && g.id.equals(b.drag.id);
         double x = g.ax, y = g.ay, W = Board.W, h = g.h, pct = Core.n(n, "pct");
         Map<String, Object> tp = portal ? Core.project(b.store, s(n, "target")) : null;
         if (dragging) fr(c, x + 4, y + 8, W, h, alpha(th.ink, .16));

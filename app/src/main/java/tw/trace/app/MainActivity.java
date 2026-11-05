@@ -213,6 +213,7 @@ public final class MainActivity extends Activity implements Board.Host, Panel.Ho
     @Override public boolean typingInPanel() { return panel != null && panel.typing(); }
     @Override public void scheduleSave() { sync.scheduleSave(); }
     @Override public void later(long ms, Runnable r) { main.postDelayed(r, ms); }
+    @Override public void haptic() { if (stage != null) stage.performHapticFeedback(android.view.HapticFeedbackConstants.LONG_PRESS); }
     @Override public void redraw() { if (stage != null) stage.postInvalidateOnAnimation(); }
     @Override public void afterRefresh() { }
 
