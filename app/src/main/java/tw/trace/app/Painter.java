@@ -220,6 +220,7 @@ final class Painter {
         drawHead(c);
         drawWires(c);
         drawCards(c);
+        drawWireDel(c);
         drawTags(c);
         drawRuler(c);
         drawWarp(c);
@@ -374,7 +375,24 @@ final class Painter {
         c.drawPath(path, stroke);
     }
 
+    /** The delete button beside the wire picked for deletion. */
+    private void drawWireDel(Canvas c) {
+        Board.Wire pick = b.wireByKey(b.selWire);
+        if (pick == null) return;
+        String label = "× 刪除這條線";
+        boolean down = b.isPressed("wireDel", null);
+        font(F.cjkMed, 13, down ? th.bg : th.accent);
+        double w = tw(label) + 26, h = 40;
+        double x = clamp(SX(b.selWx) - w / 2, 8, VW - w - 8), y = clamp(SY(b.selWy) - h - 14, b.rulerY + 8, VH - h - 8);
+        fr(c, x, y, w, h, down ? th.accent : th.bg);
+        strokeOf(th.accent, 1);
+        rectLine(c, x, y, w, h);
+        txt(c, label, x + 13, base(y, h));
+        b.addBtn(x, y, w, h, "wireDel", null);
+    }
+
     private void drawWires(Canvas c) {
+        b.wires.clear();
         String hover = b.focusId();
         boolean hN = hover != null;
         double sy = b.spine, ssy = SY(sy);
@@ -423,12 +441,28 @@ final class Painter {
         Board.Geo root = G.get("root");
         double xS = root.ax + Board.RW, xE = b.headX - Board.R_HEAD * .85;
         strokeOf(alpha(th.ink, .72), 1);
-        line(c, SX(xS), SY(sy) - 2.5, SX(xE), SY(sy) - 2.5);
-        line(c, SX(xS), SY(sy) + 2.5, SX(xE), SY(sy) + 2.5);
+        // a deleted main-line wire leaves a real gap in the spine
+        List<double[]> spans = new ArrayList<>();
+        double spanFrom = xS;
+        if (main != null) for (int si = 0; si < main.items.size(); si++) {
+            Map<String, Object> sn = main.items.get(si);
+            boolean cut = si > 0 ? Core.b(sn, "cutIn") : Core.b(main.lane, "detached");
+            if (!cut) continue;
+            double sa = si > 0 ? G.get(s(main.items.get(si - 1), "id")).ax + Board.W : xS, se = G.get(s(sn, "id")).ax;
+            if (se > sa && sa < xE) {
+                if (sa > spanFrom) spans.add(new double[]{spanFrom, sa});
+                spanFrom = Math.max(spanFrom, se);
+            }
+        }
+        if (spanFrom < xE) spans.add(new double[]{spanFrom, xE});
+        for (double[] sp : spans) {
+            line(c, SX(sp[0]), SY(sy) - 2.5, SX(sp[1]), SY(sy) - 2.5);
+            line(c, SX(sp[0]), SY(sy) + 2.5, SX(sp[1]), SY(sy) + 2.5);
+        }
         int mc = main != null ? Theme.hex(s(main.lane, "color")) : th.accent;
         double xNow = clamp(b.xOf(b.today), xS, xE);
         strokeOf(mc, 3);
-        line(c, SX(xS), SY(sy), SX(xNow), SY(sy));
+        for (double[] sp : spans) if (sp[0] < xNow) line(c, SX(sp[0]), SY(sy), SX(Math.min(sp[1], xNow)), SY(sy));
         strokeOf(alpha(th.ink, .8), 1.2);
         path.reset();
         path.moveTo(f(SX(xE) - 9), f(SY(sy) - 7));
@@ -439,7 +473,7 @@ final class Painter {
         int mi = b.laneBoxes.indexOf(main);
         for (int i = 0; i < b.laneBoxes.size(); i++) {
             Board.Lane l = b.laneBoxes.get(i);
-            if (l == main) continue;
+            if (l == main || Core.b(l.lane, "detached")) continue;
             String aid = b.anchorId(l.lane);
             Board.Geo g = G.get(aid);
             if (g == null) continue;
@@ -461,16 +495,18 @@ final class Painter {
             }
             if (offScreen(route)) continue;
             int col = Theme.hex(s(l.lane, "color"));
+            b.addWire("start", l.id, null, route, col);
             strokeOf(alpha(col, hN && !lit ? .35 : 1), lit ? 2.8 : 2);
             strokePoly(c, route);
             if (an == null || "done".equals(an.get("status"))) packets(c, route, col, hN && !lit ? .35 : 1, first != null && "done".equals(first.get("status")) ? 1 : .5);
             c.drawCircle(f(sx0), f(sy0), 3.5f, fillOf(col));
         }
         // project node into the first main-line node
-        if (main != null && !main.items.isEmpty()) {
+        if (main != null && !main.items.isEmpty() && !Core.b(main.lane, "detached")) {
             Map<String, Object> fn = main.items.get(0);
             Board.Geo fg = G.get(s(fn, "id"));
             double[][] pts = elbowPts(SX(root.ax + Board.RW), SY(root.ay + Board.H / 2), SX(fg.ax), SY(fg.ay + Board.H / 2));
+            b.addWire("start", main.id, null, pts, mc);
             strokeOf(mc, 2);
             strokePoly(c, pts);
             packets(c, pts, mc, 1, "done".equals(fn.get("status")) ? 1 : .5);
@@ -480,10 +516,12 @@ final class Painter {
             int col = Theme.hex(s(l.lane, "color"));
             for (int i = 0; i + 1 < l.items.size(); i++) {
                 Map<String, Object> a = l.items.get(i), e = l.items.get(i + 1);
+                if (Core.b(e, "cutIn")) continue;
                 Board.Geo A = G.get(s(a, "id")), B = G.get(s(e, "id"));
                 boolean lit = A.id.equals(hover) || B.id.equals(hover);
                 double[][] pts = elbowPts(SX(A.ax + Board.W), SY(A.ay + Board.H / 2), SX(B.ax), SY(B.ay + Board.H / 2));
                 if (offScreen(pts)) continue;
+                b.addWire("seq", B.id, null, pts, col);
                 double al = hN && !lit ? .3 : 1;
                 boolean shut = b.locked.contains(B.id);
                 boolean ad = "done".equals(a.get("status")) && !b.locked.contains(A.id), bd = "done".equals(e.get("status")) && !shut;
@@ -511,6 +549,7 @@ final class Painter {
                 boolean lit = A.id.equals(hover) || id.equals(hover);
                 double[][] pts = elbowPts(SX(A.ax + Board.W), SY(A.ay + Board.H / 2), SX(B.ax), SY(B.ay + Board.H / 2));
                 if (offScreen(pts)) continue;
+                b.addWire("link", A.id, id, pts, col);
                 strokeOf(alpha(col, hN && !lit ? .3 : 1), lit ? 2.4 : 1.6);
                 strokePoly(c, pts);
                 if ("done".equals(n.get("status"))) packets(c, pts, col, hN && !lit ? .35 : 1, "done".equals(B.n.get("status")) ? 1 : .5);
@@ -525,8 +564,17 @@ final class Painter {
             double prevEnd = firstOpen > 0 ? G.get(s(mItems.get(firstOpen - 1), "id")).ax + Board.W : root.ax + Board.RW;
             stopX = (prevEnd + G.get(s(mItems.get(firstOpen), "id")).ax) / 2;
         }
-        double upto = firstOpen >= 0 ? clamp((stopX - (root.ax + Board.RW)) / Math.max(1, xE - (root.ax + Board.RW)), 0, 1) : 1;
-        packets(c, new double[][]{{SX(root.ax + Board.RW), SY(sy)}, {SX(xE), SY(sy)}}, th.ink, .9, upto);
+        for (double[] sp : spans) if (firstOpen < 0 || sp[0] < stopX) {
+            packets(c, new double[][]{{SX(sp[0]), SY(sy)}, {SX(sp[1]), SY(sy)}}, th.ink, .9, firstOpen >= 0 ? clamp((stopX - sp[0]) / Math.max(1, sp[1] - sp[0]), 0, 1) : 1);
+        }
+        // the wire picked for deletion
+        Board.Wire pick = b.wireByKey(b.selWire);
+        if (pick != null) {
+            strokeOf(alpha(pick.color, .28), 9);
+            strokePoly(c, pick.pts);
+            strokeOf(pick.color, 2.6);
+            strokePoly(c, pick.pts);
+        }
     }
 
     /* ---------- fish head: lit rows of the dot matrix = overall progress ---------- */

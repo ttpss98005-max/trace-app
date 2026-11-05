@@ -258,11 +258,14 @@ final class Board {
             for (Lane l : laneBoxes) {
                 String aid = anchorId(l.lane);
                 boolean shut = false;
-                if (!"root".equals(aid)) {
+                if (!"root".equals(aid) && !Core.b(l.lane, "detached")) {
                     Map<String, Object> a = Core.nodeOf(state, aid);
                     shut = a != null && (openGate(a) || locked.contains(aid));
                 }
-                for (Map<String, Object> n : l.items) {
+                for (int i = 0; i < l.items.size(); i++) {
+                    Map<String, Object> n = l.items.get(i);
+                    /* a deleted wire ends the hold: nothing connects those nodes to the review any more */
+                    if (i > 0 && Core.b(n, "cutIn")) shut = false;
                     if (shut && locked.add(s(n, "id"))) grew = true;
                     if (openGate(n)) shut = true;
                 }
@@ -287,11 +290,12 @@ final class Board {
         for (Lane l : laneBoxes) {
             int i = -1;
             for (int k = 0; k < l.items.size(); k++) if (id.equals(s(l.items.get(k), "id"))) i = k;
-            if (i > 0) out.add(s(l.items.get(i - 1), "id"));
-            if (i >= 0 && i + 1 < l.items.size()) out.add(s(l.items.get(i + 1), "id"));
+            if (i > 0 && !Core.b(l.items.get(i), "cutIn")) out.add(s(l.items.get(i - 1), "id"));
+            if (i >= 0 && i + 1 < l.items.size() && !Core.b(l.items.get(i + 1), "cutIn")) out.add(s(l.items.get(i + 1), "id"));
             String aid = anchorId(l.lane);
-            if (i == 0) out.add(l == mainBox ? "root" : aid);
-            if (id.equals(aid) && !l.items.isEmpty()) out.add(s(l.items.get(0), "id"));
+            boolean started = !Core.b(l.lane, "detached");
+            if (i == 0 && started) out.add(l == mainBox ? "root" : aid);
+            if (id.equals(aid) && started && l != mainBox && !l.items.isEmpty()) out.add(s(l.items.get(0), "id"));
         }
         return out;
     }
@@ -420,6 +424,94 @@ final class Board {
     Link link;
     Pinch pinch;
     String hoverId, selId;
+
+    /* every wire drawn this frame, in screen coordinates, so a tap can find the one under the finger */
+    static final class Wire { String key, kind, id, to; double[][] pts; int color; }
+    final List<Wire> wires = new ArrayList<>();
+    String selWire;
+    double selWx, selWy;
+
+    void addWire(String kind, String id, String to, double[][] pts, int color) {
+        Wire w = new Wire();
+        w.kind = kind; w.id = id; w.to = to; w.pts = pts; w.color = color;
+        w.key = kind + ":" + id + (to == null ? "" : ":" + to);
+        wires.add(w);
+    }
+
+    Wire wireByKey(String key) {
+        if (key == null) return null;
+        for (Wire w : wires) if (key.equals(w.key)) return w;
+        return null;
+    }
+
+    private static double segDist(double x, double y, double[] a, double[] e) {
+        double dx = e[0] - a[0], dy = e[1] - a[1], q = dx * dx + dy * dy;
+        double k = q > 0 ? clamp(((x - a[0]) * dx + (y - a[1]) * dy) / q, 0, 1) : 0;
+        return Math.hypot(x - a[0] - k * dx, y - a[1] - k * dy);
+    }
+
+    Wire wireAt(double x, double y, double tol) {
+        Wire best = null;
+        double bd = tol;
+        for (Wire w : wires) {
+            double d = Double.MAX_VALUE;
+            for (int i = 0; i + 1 < w.pts.length; i++) d = Math.min(d, segDist(x, y, w.pts[i], w.pts[i + 1]));
+            if ("link".equals(w.kind)) d -= .5;
+            if (d <= bd) { bd = d; best = w; }
+        }
+        return best;
+    }
+
+    void deleteWire(String key) {
+        Wire w = wireByKey(key);
+        if (w == null) return;
+        Map<String, Object> src = null;
+        if ("link".equals(w.kind)) {
+            src = Core.nodeOf(state, w.id);
+            if (src != null) {
+                List<Object> keep = new ArrayList<>(Core.links(src));
+                keep.remove(w.to);
+                if (keep.isEmpty()) src.remove("links"); else src.put("links", keep);
+            }
+        } else if ("seq".equals(w.kind)) {
+            Map<String, Object> n = Core.nodeOf(state, w.id);
+            if (n != null) n.put("cutIn", Boolean.TRUE);
+        } else {
+            Map<String, Object> l = Core.laneOf(state, w.id);
+            if (l != null) l.put("detached", Boolean.TRUE);
+        }
+        selWire = null;
+        commit();
+        if (src != null && "node".equals(host.panelMode()) && w.id.equals(selId)) host.openEdit(w.id, false);
+        if ("set".equals(host.panelMode())) host.redrawPanel();
+        toast("已刪除連線", "復原", undo);
+    }
+
+    /** The node right before this one on its own timeline, the one a timeline wire would come from. */
+    private String prevInLane(Map<String, Object> n) {
+        for (Lane l : laneBoxes) {
+            if (!l.id.equals(s(n, "lane"))) continue;
+            for (int i = 1; i < l.items.size(); i++) if (l.items.get(i) == n) return s(l.items.get(i - 1), "id");
+        }
+        return null;
+    }
+
+    /** Demo mode only: shows the screenshots what picking and deleting a wire look like. */
+    void demoWire(boolean cut) {
+        Wire seq = null;
+        for (Wire w : wires) if ("seq".equals(w.kind)) { seq = w; break; }
+        if (seq == null) return;
+        if (cut) {
+            for (Wire w : new ArrayList<>(wires)) if ("seq".equals(w.kind) || "start".equals(w.kind)) { deleteWire(w.key); break; }
+            return;
+        }
+        double[] p = seq.pts[0], e = seq.pts[seq.pts.length - 1];
+        double x = (p[0] + e[0]) / 2, y = (p[1] + e[1]) / 2;
+        selWire = seq.key;
+        selWx = (x - camX) / camZ;
+        selWy = (y - camY) / camZ;
+        need();
+    }
     double touchX = -9999, touchY = -9999;
     private double lastTap = 0, lastTapX = 0, lastTapY = 0;
     private final Map<Integer, double[]> pts = new LinkedHashMap<>();
@@ -487,6 +579,7 @@ final class Board {
         }
         if (pts.size() > 2) return;
         camOn = false;
+        if (selWire != null) { selWire = null; need(); }
         double wx = (x - camX) / camZ, wy = (y - camY) / camZ;
         /* fingers need bigger targets than the drawn dots, whatever the zoom */
         double slopPull = Math.max(far() ? 18 : 15.5, 16 / camZ);
@@ -615,8 +708,15 @@ final class Board {
             if ("node".equals(k.tKind)) {
                 List<Object> links = Core.links(src);
                 if (!(src.get("links") instanceof List)) src.put("links", links);
-                if (links.contains(k.tVal)) { toast("這兩個節點已經連接了", null, null); return; }
                 Map<String, Object> to = Core.nodeOf(state, k.tVal);
+                if (to != null && Core.b(to, "cutIn") && s(to, "lane").equals(s(src, "lane")) && k.from.equals(prevInLane(to))) {
+                    if (links.isEmpty()) src.remove("links");
+                    to.remove("cutIn");
+                    commit();
+                    toast("已接回「" + s(to, "title") + "」", "復原", undo);
+                    return;
+                }
+                if (links.contains(k.tVal)) { toast("這兩個節點已經連接了", null, null); return; }
                 links.add(k.tVal);
                 commit();
                 if ("node".equals(host.panelMode()) && k.from.equals(selId)) host.openEdit(k.from, false);
@@ -632,6 +732,7 @@ final class Board {
         if ("lane".equals(k.tKind)) {
             Map<String, Object> lane = Core.laneOf(state, k.tVal);
             lane.put("from", k.from);
+            lane.remove("detached");
             commit();
             if ("set".equals(host.panelMode())) host.redrawPanel();
             toast("「" + s(lane, "name") + "」改從「" + fromName + "」開始", "復原", undo);
@@ -651,6 +752,7 @@ final class Board {
         if (d.moved && !canceled) {
             Map<String, Object> n = Core.nodeOf(state, d.id);
             if (n != null) {
+                if (!String.valueOf(d.lane).equals(s(n, "lane"))) n.remove("cutIn");
                 n.put("date", ds(d.date));
                 n.put("lane", d.lane);
                 commit();
@@ -678,6 +780,16 @@ final class Board {
         double wx = (x - camX) / camZ, wy = (y - camY) / camZ;
         Lane tail = pickTail(wx, wy, Math.max(0, 8 / camZ));
         if (tail != null) { host.openNew(tail.id, null, null); return; }
+        Wire hit = wireAt(x, y, 14);
+        if (hit != null) {
+            lastTap = 0;
+            selWire = hit.key;
+            selWx = wx;
+            selWy = wy;
+            hoverId = null;
+            need();
+            return;
+        }
         if (total >= 100 && Math.abs(wx - headX) < R_HEAD * .95 && Math.abs(wy - headY) < R_HEAD * 1.3) { playFinale(); return; }
         if (now - lastTap < 340 && Math.hypot(x - lastTapX, y - lastTapY) < 16) {
             lastTap = 0;
@@ -818,6 +930,8 @@ final class Board {
         seq.clear();
         hoverId = null;
         selId = null;
+        wires.clear();
+        selWire = null;
     }
 
     /* ---------- screens ---------- */
@@ -868,6 +982,7 @@ final class Board {
     }
 
     void showHub() {
+        selWire = null;
         if (host.panelOpen()) host.closePanel();
         hubOpen = true;
         hubScroll = 0;
@@ -1028,6 +1143,7 @@ final class Board {
             case "add": host.openNew(null, null, null); break;
             case "tag": host.openSettings(arg); break;
             case "finGo": finaleOpen = false; need(); break;
+            case "wireDel": deleteWire(selWire); break;
             case "toastAct": {
                 Runnable f = toastFn;
                 toastMsg = null;

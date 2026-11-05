@@ -20,6 +20,8 @@ rot 0
 run board; rot 1; shot land-board-rotated; rot 0; shot port-board-rotated
 run hub; shot port-hub
 run settings; shot port-settings
+run wire; shot port-wire-picked
+run wirecut; shot port-wire-deleted
 run login; shot port-login
 adb logcat -d -b crash > shots/crash.txt || true
 exit 0

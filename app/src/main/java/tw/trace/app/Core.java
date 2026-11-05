@@ -238,6 +238,7 @@ final class Core {
             l.put("name", l.get("name") == null ? "未命名" : jsString(l.get("name")));
             Object col = l.get("color");
             if (!(col instanceof String) || !HEX.matcher((String) col).find()) l.put("color", "#119EAE");
+            if (!Boolean.TRUE.equals(l.get("detached"))) l.remove("detached");
         }
         List<Object> ns = onlyObjects(arr(p.get("nodes")));
         p.put("nodes", ns);
@@ -255,6 +256,7 @@ final class Core {
             if (b(n, "items") && !(n.get("items") instanceof List)) n.put("items", new ArrayList<Object>());
             if (b(n, "items")) n.put("items", onlyObjects(arr(n.get("items"))));
             if (b(n, "links") && !(n.get("links") instanceof List)) n.remove("links");
+            if (!Boolean.TRUE.equals(n.get("cutIn"))) n.remove("cutIn");
         }
         return p;
     }

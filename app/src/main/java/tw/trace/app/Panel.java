@@ -386,7 +386,7 @@ final class Panel {
         laneBtn.setOnClickListener(new View.OnClickListener() {
             @Override public void onClick(View v) {
                 choose("時間線", namesF, new Pick() {
-                    @Override public void picked(int i) { n.put("lane", s(ls.get(i), "id")); laneBtn.setText(namesF[i]); set(isNew); }
+                    @Override public void picked(int i) { n.remove("cutIn"); n.put("lane", s(ls.get(i), "id")); laneBtn.setText(namesF[i]); set(isNew); }
                 });
             }
         });
@@ -1048,23 +1048,42 @@ final class Panel {
             TextView kind = tv((isMain ? "主線" : "支線") + " · " + cnt + " 個節點", 11, th().dim, host.mono());
             kind.setPadding(dp(43), 0, 0, 0);
             laneBox.addView(gapped(kind, 3));
+            if (isMain) {
+                final String[] mainNames = {"起點：專案（" + s(B.state, "name") + "）", "起點：不連接"};
+                Button mainSel = select(mainNames[Core.b(l, "detached") ? 1 : 0], s(l, "name") + " 與專案節點的連線", mainNames, new Pick() {
+                    @Override public void picked(int k) {
+                        if (k == 1) l.put("detached", Boolean.TRUE); else l.remove("detached");
+                        B.commit();
+                        renderLaneList(null);
+                    }
+                });
+                mainSel.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 12.5f);
+                LinearLayout.LayoutParams msp = full();
+                msp.leftMargin = dp(43);
+                msp.topMargin = dp(4);
+                mainSel.setLayoutParams(msp);
+                laneBox.addView(mainSel);
+            }
             if (!isMain) {
                 final String aid = B.anchorId(l);
                 final List<Map<String, Object>> opts = new ArrayList<>();
                 for (Map<String, Object> m : nodes(B.state)) if (!id.equals(s(m, "lane"))) opts.add(m);
                 opts.sort((x, y) -> dn(s(x, "date")) - dn(s(y, "date")));
-                final String[] names = new String[opts.size() + 1];
-                names[0] = "起點：專案（" + s(B.state, "name") + "）";
-                String cur = names[0];
+                final boolean off = Core.b(l, "detached");
+                final String[] names = new String[opts.size() + 2];
+                names[0] = "起點：不連接";
+                names[1] = "起點：專案（" + s(B.state, "name") + "）";
+                String cur = off ? names[0] : names[1];
                 for (int k = 0; k < opts.size(); k++) {
                     Map<String, Object> m = opts.get(k);
                     Map<String, Object> ml = Core.laneOf(B.state, s(m, "lane"));
-                    names[k + 1] = "起點：" + (ml == null ? "" : s(ml, "name")) + " / " + s(m, "title") + "（" + s(m, "date").substring(5).replace('-', '/') + "）";
-                    if (aid.equals(s(m, "id"))) cur = names[k + 1];
+                    names[k + 2] = "起點：" + (ml == null ? "" : s(ml, "name")) + " / " + s(m, "title") + "（" + s(m, "date").substring(5).replace('-', '/') + "）";
+                    if (!off && aid.equals(s(m, "id"))) cur = names[k + 2];
                 }
                 Button sel = select(cur, s(l, "name") + " 的起點", names, new Pick() {
                     @Override public void picked(int k) {
-                        l.put("from", k == 0 ? "root" : s(opts.get(k - 1), "id"));
+                        if (k == 0) l.put("detached", Boolean.TRUE);
+                        else { l.remove("detached"); l.put("from", k == 1 ? "root" : s(opts.get(k - 2), "id")); }
                         B.commit();
                         renderLaneList(null);
                     }
@@ -1075,7 +1094,7 @@ final class Panel {
                 sp.topMargin = dp(4);
                 sel.setLayoutParams(sp);
                 laneBox.addView(sel);
-                if (!"root".equals(aid)) {
+                if (!off && !"root".equals(aid)) {
                     int early = 0, ad = dn(s(Core.nodeOf(B.state, aid), "date"));
                     for (Map<String, Object> m : nodes(B.state)) if (id.equals(s(m, "lane")) && dn(s(m, "date")) < ad) early++;
                     if (early > 0) {

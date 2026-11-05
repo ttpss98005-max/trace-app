@@ -129,6 +129,10 @@ public final class MainActivity extends Activity implements Board.Host, Panel.Ho
         if ("hub".equals(sc)) board.showHub();
         else if ("login".equals(sc)) { board.loginOpen = true; sync.setNote("登入後，專案會跟著你的 Google 帳戶同步。", false); }
         else if ("panel".equals(sc)) stage.post(new Runnable() { @Override public void run() { openEdit(s(Core.nodes(board.state).get(3), "id"), true); } });
+        else if ("wire".equals(sc) || "wirecut".equals(sc)) {
+            final boolean cut = "wirecut".equals(sc);
+            stage.postDelayed(new Runnable() { @Override public void run() { board.demoWire(cut); } }, 1500);
+        }
         else if ("settings".equals(sc)) stage.post(new Runnable() { @Override public void run() { openSettings(null); } });
     }
 
@@ -164,6 +168,7 @@ public final class MainActivity extends Activity implements Board.Host, Panel.Ho
     @Override public void onBackPressed() {
         if (board.finaleOpen) { board.finaleOpen = false; board.need(); return; }
         if (panel.open()) { panel.close(); return; }
+        if (board.selWire != null) { board.selWire = null; board.need(); return; }
         if (board.loginOpen) { super.onBackPressed(); return; }
         if (!board.hubOpen) {
             if (!board.warpStack.isEmpty()) board.back();
